@@ -13,15 +13,16 @@ df = pd.read_excel(file_path)
 codes_array = df.iloc[:, 4].astype(str).str.replace("-", "_").tolist()  # Column E is index 4 (zero-based)
 
 # Extract the names of the photos
-photo_directory = "./fototest"
+photo_directory = "T:/Imatges Concrete"
 codesPhotos_array = [entry for entry in os.listdir(photo_directory)]  # List comprehension for cleaner code
-
+print(codesPhotos_array)
 #check which photos exist in directory:
 
 matches = [code for code in codes_array if any(code in photo for photo in codesPhotos_array)]
-
+print("matches: ", matches)
 # Find missing codes (not found in any photo filenames)
 missing_codes = [code for code in codes_array if not any(code in photo for photo in codesPhotos_array)]
+print("missing codes: ", missing_codes)
 
 # Ask user if they want to download missing articles
 user_choice = input("Do you want to download missing articles? (y/n): ").strip().lower()
@@ -36,7 +37,7 @@ else:
 from collections import defaultdict
 
 # Define source and destination directories
-photo_directory = "./fototest"
+# photo_directory = "./fototest"
 destination_directory = "./foundPhotos"
 
 # Ensure the destination directory exists
@@ -64,7 +65,7 @@ def extract_article_color(photo_name):
 sorted_photos = []
 for photo in codesPhotos_array:
     article_color, suffix = extract_article_color(photo)
-    if article_color and suffix:
+    if article_color and suffix and article_color in matches:
         sorted_photos.append((article_color, suffix, photo))
 
 # Step 1: Group by ARTICLE_COLOR
@@ -76,7 +77,7 @@ for article_color, suffix, photo in sorted_photos:
 for article_color, photos in photos_by_color.items():
     photos.sort(key=lambda x: (priority_order.index(x[0]) if x[0] in priority_order else float('inf')))
     article_counters[article_color] = 0  # Reset numbering for each group
-    
+
     # Rename and copy files
     for suffix, photo in photos:
         article_counters[article_color] += 1
@@ -86,5 +87,4 @@ for article_color, photos in photos_by_color.items():
         shutil.copy(source_path, destination_path)
 
 print(f"Matching photos copied and renamed in '{destination_directory}' with correct ordering!")
-
 
