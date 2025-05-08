@@ -8,16 +8,15 @@ import shutil
 # Load the Excel file
 file_path = "./CornerDigitalExample.xlsx"  # Update this with the actual file path
 df = pd.read_excel(file_path)
-
 # Extract column E values and replace '-' with '_'
 codes_array = df.iloc[:, 4].astype(str).str.replace("-", "_").tolist()  # Column E is index 4 (zero-based)
+print(codes_array)
 
 # Extract the names of the photos
 photo_directory = "T:/Imatges Concrete"
 codesPhotos_array = [entry for entry in os.listdir(photo_directory)]  # List comprehension for cleaner code
-print(codesPhotos_array)
-#check which photos exist in directory:
 
+#check which photos exist in directory:
 matches = [code for code in codes_array if any(code in photo for photo in codesPhotos_array)]
 print("matches: ", matches)
 # Find missing codes (not found in any photo filenames)
