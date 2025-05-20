@@ -1,13 +1,10 @@
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk
 import sqlite3
-import os
-import shutil
 from PIL import Image, ImageTk
 
 DATABASE_PATH = "photos.db"
 PAGE_SIZE = 9  # Load images in blocks of 9
-image_cache = {}  # Cache for faster image retrieval
 
 class ImageSearchApp:
     def __init__(self, root):
@@ -15,7 +12,7 @@ class ImageSearchApp:
         self.root.title("Image Search")
         self.root.attributes('-fullscreen', True)  # Enable fullscreen
 
-        # Exit Fullscreen Button
+        # Create a close button for exiting fullscreen
         ttk.Button(root, text="Exit Fullscreen", command=self.exit_fullscreen).pack(anchor='ne', padx=10, pady=10)
 
         # Search Field
@@ -34,24 +31,21 @@ class ImageSearchApp:
             frame.grid(row=i // 3, column=i % 3, padx=10, pady=10)
             self.image_frames.append(frame)
 
-        # Navigation Buttons + Page Selector + Download Button
+        # Navigation Buttons
         self.nav_frame = tk.Frame(root)
         self.nav_frame.pack()
 
         self.prev_button = ttk.Button(self.nav_frame, text="Previous", command=self.previous_page)
         self.prev_button.pack(side="left", padx=20, pady=10)
 
+        # **Dropdown for Page Selection**
         self.page_var = tk.StringVar()
         self.page_selector = ttk.Combobox(self.nav_frame, textvariable=self.page_var, state="readonly")
         self.page_selector.pack(side="left", padx=20)
         self.page_selector.bind("<<ComboboxSelected>>", self.jump_to_page)
-
+        
         self.next_button = ttk.Button(self.nav_frame, text="Next", command=self.next_page)
         self.next_button.pack(side="right", padx=20, pady=10)
-
-        # **Download Button**
-        self.download_button = ttk.Button(root, text="Download ZIP", command=self.download_images)
-        self.download_button.pack(pady=10)
 
         # Image Data
         self.image_paths = []
@@ -61,9 +55,8 @@ class ImageSearchApp:
         self.root.attributes('-fullscreen', False)
 
     def search_images(self):
-        """Fetch image paths from database and update pagination."""
         query = self.search_entry.get()
-        
+    
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT filepath FROM images WHERE filename LIKE ?", ('%' + query + '%',))
@@ -71,92 +64,60 @@ class ImageSearchApp:
         conn.close()
 
         self.current_page = 0
-        self.update_page_selector()
+        self.update_page_selector()  # ✅ Update dropdown values
         self.display_images()
 
+
     def update_page_selector(self):
-        """Update page dropdown dynamically."""
         total_pages = max(1, (len(self.image_paths) + PAGE_SIZE - 1) // PAGE_SIZE)
         self.page_selector["values"] = [str(i + 1) for i in range(total_pages)]
         self.page_selector.current(self.current_page)
 
-    def get_cached_image(self, image_path):
-        """Cache images for faster access."""
-        if image_path not in image_cache:
-            img = Image.open(image_path)
-            img.thumbnail((150, 150))  # Adjusted thumbnail size
-            image_cache[image_path] = ImageTk.PhotoImage(img)
-        return image_cache[image_path]
-
     def display_images(self):
-        """Load images for the current page."""
-        start_index = self.current_page * PAGE_SIZE
-        end_index = min(start_index + PAGE_SIZE, len(self.image_paths))
-        images_to_display = self.image_paths[start_index:end_index]
-
         # Clear previous images
         for frame in self.image_frames:
             frame.config(image="", text="")
-
+        
         # Display images
-        for i, image_path in enumerate(images_to_display):
-            img = self.get_cached_image(image_path)
+        for i, image_path in enumerate(self.image_paths[self.current_page * PAGE_SIZE : (self.current_page + 1) * PAGE_SIZE]):
+            img = Image.open(image_path)
+            img.thumbnail((150, 150))
+            img = ImageTk.PhotoImage(img)
+
             self.image_frames[i].config(image=img)
             self.image_frames[i].image = img  # Keep reference
             self.image_frames[i].bind("<Button-1>", lambda e, path=image_path: self.show_full_image(path))
 
+        #pagination display
         self.page_selector.current(self.current_page)
 
     def show_full_image(self, image_path):
-        """Display full-size image in a popup."""
         top = tk.Toplevel(self.root)
         top.title("Image Preview")
         
         img = Image.open(image_path)
-        img.thumbnail((700, 700))
+        img.thumbnail((500, 500))
         img = ImageTk.PhotoImage(img)
 
         label = ttk.Label(top, image=img)
         label.image = img  # Keep reference
         label.pack()
 
+
     def next_page(self):
-        """Navigate to next page."""
         if (self.current_page + 1) * PAGE_SIZE < len(self.image_paths):
             self.current_page += 1
             self.display_images()
 
     def previous_page(self):
-        """Navigate to previous page."""
         if self.current_page > 0:
             self.current_page -= 1
             self.display_images()
 
     def jump_to_page(self, event):
-        """Jump to selected page from dropdown."""
         selected_page = int(self.page_var.get()) - 1
         self.current_page = selected_page
         self.display_images()
-
-    def download_images(self):
-        """Compress and download searched images."""
-        if not self.image_paths:
-            print("No images found to download!")
-            return
-        
-        # Ask user for destination folder
-        folder_selected = filedialog.askdirectory(title="Select download location")
-        if not folder_selected:
-            return
-
-        zip_filename = os.path.join(folder_selected, "searched_images.zip")
-
-        # Create a ZIP file with the searched images
-        with shutil.ZipFile(zip_filename, 'w') as zipf:
-            for image_path in self.image_paths:
-                zipf.write(image_path, os.path.basename(image_path))
-
-        print(f"ZIP file saved at: {zip_filename}")
 
 # Run the App
 root = tk.Tk()
