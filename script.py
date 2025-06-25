@@ -1,164 +1,89 @@
-import tkinter as tk
-from tkinter import ttk, filedialog
-import sqlite3
 import os
-import shutil
-from PIL import Image, ImageTk
+import tkinter 
+from tkinter import ttk
+from tkinter.filedialog import askdirectory
+import pandas as pd
+import shutil 
 
-DATABASE_PATH = "photos.db"
-PAGE_SIZE = 9  # Load images in blocks of 9
-image_cache = {}  # Cache for faster image retrieval
+# Load the Excel file
+file_path = "./CornerDigitalExample.xlsx"  # Update this with the actual file path
+df = pd.read_excel(file_path)
 
-class ImageSearchApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Image Search")
-        self.root.attributes('-fullscreen', True)  # Enable fullscreen
+# Extract column E values and replace '-' with '_'
+codes_array = df.iloc[:, 4].astype(str).str.replace("-", "_").tolist()  # Column E is index 4 (zero-based)
 
-        # Exit Fullscreen Button
-        ttk.Button(root, text="Exit Fullscreen", command=self.exit_fullscreen).pack(anchor='ne', padx=10, pady=10)
+# Extract the names of the photos
+photo_directory = "T:/Imatges Concrete"
+codesPhotos_array = [entry for entry in os.listdir(photo_directory)]  # List comprehension for cleaner code
+print(codesPhotos_array)
+#check which photos exist in directory:
 
-        # Search Field
-        ttk.Label(root, text="Search Image:").pack(pady=10)
-        self.search_entry = ttk.Entry(root, width=40)
-        self.search_entry.pack()
-        ttk.Button(root, text="Search", command=self.search_images).pack(pady=5)
+matches = [code for code in codes_array if any(code in photo for photo in codesPhotos_array)]
+print("matches: ", matches)
+# Find missing codes (not found in any photo filenames)
+missing_codes = [code for code in codes_array if not any(code in photo for photo in codesPhotos_array)]
+print("missing codes: ", missing_codes)
 
-        # Image Grid
-        self.image_frames = []
-        self.image_frame_container = tk.Frame(root)
-        self.image_frame_container.pack(pady=20)
+# Ask user if they want to download missing articles
+user_choice = input("Do you want to download missing articles? (y/n): ").strip().lower()
 
-        for i in range(PAGE_SIZE):
-            frame = tk.Label(self.image_frame_container)
-            frame.grid(row=i // 3, column=i % 3, padx=10, pady=10)
-            self.image_frames.append(frame)
+if user_choice == "y":
+    missing_df = pd.DataFrame({"Missing Articles": missing_codes}).drop_duplicates()
+    missing_df.to_excel("missing_articles.xlsx", index=False, )
+    print("Missing articles saved as 'missing_articles.xlsx'.")
+else:
+    print("No file downloaded.")
 
-        # Navigation Buttons + Page Selector + Download Button
-        self.nav_frame = tk.Frame(root)
-        self.nav_frame.pack()
+from collections import defaultdict
 
-        self.prev_button = ttk.Button(self.nav_frame, text="Previous", command=self.previous_page)
-        self.prev_button.pack(side="left", padx=20, pady=10)
+# Define source and destination directories
+# photo_directory = "./fototest"
+destination_directory = "./foundPhotos"
 
-        self.page_var = tk.StringVar()
-        self.page_selector = ttk.Combobox(self.nav_frame, textvariable=self.page_var, state="readonly")
-        self.page_selector.pack(side="left", padx=20)
-        self.page_selector.bind("<<ComboboxSelected>>", self.jump_to_page)
+# Ensure the destination directory exists
+os.makedirs(destination_directory, exist_ok=True)
 
-        self.next_button = ttk.Button(self.nav_frame, text="Next", command=self.next_page)
-        self.next_button.pack(side="right", padx=20, pady=10)
+# Define the priority order
+priority_order = ["MOD", "ED", "FLATFRONT", "FLATBACK"]
 
-        # **Download Button**
-        self.download_button = ttk.Button(root, text="Download ZIP", command=self.download_images)
-        self.download_button.pack(pady=10)
+# Dictionary to track numbering for each ARTICLE_COLOR
+article_counters = defaultdict(int)
 
-        # Image Data
-        self.image_paths = []
-        self.current_page = 0
+# Function to extract ARTICLE_COLOR and suffix from filename
+def extract_article_color(photo_name):
+    parts = photo_name.split("_")
+    if len(parts) >= 5:
+        article_color = "_".join(parts[:2])  # First two parts form ARTICLE_COLOR
+        suffix = os.path.splitext(parts[4])[0]  # Remove file extensions (e.g., "jpg")
+        # Ensure the suffix matches priority_order
+        cleaned_suffix = next((order for order in priority_order if order in suffix), suffix)
+        return article_color, cleaned_suffix
+    return None, None
 
-    def exit_fullscreen(self):
-        self.root.attributes('-fullscreen', False)
 
-    def search_images(self):
-        """Fetch image paths from database and update pagination."""
-        query = self.search_entry.get()
-        
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT filepath FROM images WHERE filename LIKE ?", ('%' + query + '%',))
-        self.image_paths = [row[0] for row in cursor.fetchall()]
-        conn.close()
+# Collect and sort photos by priority
+sorted_photos = []
+for photo in codesPhotos_array:
+    article_color, suffix = extract_article_color(photo)
+    if article_color and suffix and article_color in matches:
+        sorted_photos.append((article_color, suffix, photo))
 
-        self.current_page = 0
-        self.update_page_selector()
-        self.display_images()
+# Step 1: Group by ARTICLE_COLOR
+photos_by_color = defaultdict(list)
+for article_color, suffix, photo in sorted_photos:
+    photos_by_color[article_color].append((suffix, photo))
 
-    def update_page_selector(self):
-        """Update page dropdown dynamically."""
-        total_pages = max(1, (len(self.image_paths) + PAGE_SIZE - 1) // PAGE_SIZE)
-        self.page_selector["values"] = [str(i + 1) for i in range(total_pages)]
-        self.page_selector.current(self.current_page)
+# Step 2: Sort within each ARTICLE_COLOR group by priority
+for article_color, photos in photos_by_color.items():
+    photos.sort(key=lambda x: (priority_order.index(x[0]) if x[0] in priority_order else float('inf')))
+    article_counters[article_color] = 0  # Reset numbering for each group
 
-    def get_cached_image(self, image_path):
-        """Cache images for faster access."""
-        if image_path not in image_cache:
-            img = Image.open(image_path)
-            img.thumbnail((150, 150))  # Adjusted thumbnail size
-            image_cache[image_path] = ImageTk.PhotoImage(img)
-        return image_cache[image_path]
+    # Rename and copy files
+    for suffix, photo in photos:
+        article_counters[article_color] += 1
+        new_filename = f"{article_color}_{article_counters[article_color]}{os.path.splitext(photo)[-1]}"
+        source_path = os.path.join(photo_directory, photo)
+        destination_path = os.path.join(destination_directory, new_filename)
+        shutil.copy(source_path, destination_path)
 
-    def display_images(self):
-        """Load images for the current page."""
-        start_index = self.current_page * PAGE_SIZE
-        end_index = min(start_index + PAGE_SIZE, len(self.image_paths))
-        images_to_display = self.image_paths[start_index:end_index]
-
-        # Clear previous images
-        for frame in self.image_frames:
-            frame.config(image="", text="")
-
-        # Display images
-        for i, image_path in enumerate(images_to_display):
-            img = self.get_cached_image(image_path)
-            self.image_frames[i].config(image=img)
-            self.image_frames[i].image = img  # Keep reference
-            self.image_frames[i].bind("<Button-1>", lambda e, path=image_path: self.show_full_image(path))
-
-        self.page_selector.current(self.current_page)
-
-    def show_full_image(self, image_path):
-        """Display full-size image in a popup."""
-        top = tk.Toplevel(self.root)
-        top.title("Image Preview")
-        
-        img = Image.open(image_path)
-        img.thumbnail((700, 700))
-        img = ImageTk.PhotoImage(img)
-
-        label = ttk.Label(top, image=img)
-        label.image = img  # Keep reference
-        label.pack()
-
-    def next_page(self):
-        """Navigate to next page."""
-        if (self.current_page + 1) * PAGE_SIZE < len(self.image_paths):
-            self.current_page += 1
-            self.display_images()
-
-    def previous_page(self):
-        """Navigate to previous page."""
-        if self.current_page > 0:
-            self.current_page -= 1
-            self.display_images()
-
-    def jump_to_page(self, event):
-        """Jump to selected page from dropdown."""
-        selected_page = int(self.page_var.get()) - 1
-        self.current_page = selected_page
-        self.display_images()
-
-    def download_images(self):
-        """Compress and download searched images."""
-        if not self.image_paths:
-            print("No images found to download!")
-            return
-        
-        # Ask user for destination folder
-        folder_selected = filedialog.askdirectory(title="Select download location")
-        if not folder_selected:
-            return
-
-        zip_filename = os.path.join(folder_selected, "searched_images.zip")
-
-        # Create a ZIP file with the searched images
-        with shutil.ZipFile(zip_filename, 'w') as zipf:
-            for image_path in self.image_paths:
-                zipf.write(image_path, os.path.basename(image_path))
-
-        print(f"ZIP file saved at: {zip_filename}")
-
-# Run the App
-root = tk.Tk()
-app = ImageSearchApp(root)
-root.mainloop()
+print(f"Matching photos copied and renamed in '{destination_directory}' with correct ordering!")
