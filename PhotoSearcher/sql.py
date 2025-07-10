@@ -16,7 +16,7 @@ PAGE_SIZE = 9  # Load images in blocks of 9
 class ImageSearchApp:
     def threaded_database_update(self):
         """Threaded function to sync images directory with the SQLite database."""
-        self.search_status.config(text="Updating database... ⏳")
+        self.search_status.config(text="Actualitzant base de dades... ⏳")
         self.root.update()
 
         try:
@@ -54,7 +54,7 @@ class ImageSearchApp:
                     [(fp,) for fp in deleted_files]
                 )
                 cursor.execute("COMMIT")
-                self.search_status.config(text=f"❌ Deleted {len(deleted_files)} missing images.")
+                self.search_status.config(text=f"❌ S'han esborrat {len(deleted_files)} imatges.")
 
             # ✅ Insert new files into database
             if new_files:
@@ -64,7 +64,7 @@ class ImageSearchApp:
                     new_files
                 )
                 cursor.execute("COMMIT")
-                self.search_status.config(text=f"✅ Added {len(new_files)} new images!")
+                self.search_status.config(text=f"✅ S'han afegit {len(new_files)} noves imatges!")
 
             conn.close()
 
@@ -80,7 +80,7 @@ class ImageSearchApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Image Search")
-        self.root.attributes('-fullscreen', True)  # Enable fullscreen
+        self.root.state('zoomed')  # Maximizes the window but keeps the title bar
 
         self.selected_files = []
         self.selection_states = {}  # Stores {file_path: BooleanVar()}
@@ -92,15 +92,14 @@ class ImageSearchApp:
             shutil.rmtree(temp_folder)  # ✅ Deletes all previous images
         os.makedirs(temp_folder)  # ✅ Recreate empty temp folder
 
-        ttk.Button(root, text="Exit Fullscreen", command=self.exit_fullscreen).pack(anchor='ne', padx=10, pady=10)
+        ttk.Button(root, text="Actualitzar Base de dades", command=lambda: threading.Thread(target=self.update_database).start()).pack(pady=10)
 
-        ttk.Button(root, text="Update Database", command=lambda: threading.Thread(target=self.update_database).start()).pack(pady=10)
-
-        ttk.Label(root, text="Selected Photos").pack(anchor='ne', padx=10, pady=5)
+        ttk.Label(root, text="Fotos seleccionades").pack(anchor='ne', padx=10, pady=5)
         self.selected_dropdown = ttk.Combobox(root, values=[], state="readonly")
         self.selected_dropdown.pack(anchor='ne', padx=10)
+        ttk.Button(root, text="Eliminar selecció", command=self.remove_selected_item).pack(anchor='ne', padx=10, pady=5)
 
-        ttk.Label(root, text="Search Image:").pack(pady=10)
+        ttk.Label(root, text="Buscar imatge:").pack(pady=5)
         self.search_entry = ttk.Entry(root, width=40)  # Define search_entry first!
         self.search_entry.pack()
         self.search_entry.bind("<Return>", self.search_images)  # ✅ Move binding after definition
@@ -113,19 +112,19 @@ class ImageSearchApp:
 
         self.image_frames = []
         self.image_frame_container = tk.Frame(root)
-        self.image_frame_container.pack(pady=20)
+        self.image_frame_container.pack(pady=5)
 
         for i in range(PAGE_SIZE):
             frame = tk.Label(self.image_frame_container)
             frame.grid(row=i // 3, column=i % 3, padx=10, pady=10)
             self.image_frames.append(frame)
 
-        ttk.Button(root, text="Download Selected", command=self.run_download_script).pack(pady=10)
+        ttk.Button(root, text="Descarregar selecció", command=self.run_download_script).pack(pady=10)
    
         self.nav_frame = tk.Frame(root)
         self.nav_frame.pack()
 
-        self.prev_button = ttk.Button(self.nav_frame, text="Previous", command=self.previous_page)
+        self.prev_button = ttk.Button(self.nav_frame, text="Anterior", command=self.previous_page)
         self.prev_button.pack(side="left", padx=20, pady=10)
 
         self.page_var = tk.StringVar()
@@ -133,18 +132,29 @@ class ImageSearchApp:
         self.page_selector.pack(side="left", padx=20)
         self.page_selector.bind("<<ComboboxSelected>>", self.jump_to_page)
         
-        self.next_button = ttk.Button(self.nav_frame, text="Next", command=self.next_page)
+        self.next_button = ttk.Button(self.nav_frame, text="Següent", command=self.next_page)
         self.next_button.pack(side="right", padx=20, pady=10)
 
         # Image Data
         self.image_paths = []
         self.current_page = 0
 
-    def exit_fullscreen(self):
-        self.root.attributes('-fullscreen', False)
+    def remove_selected_item(self):
+        selected_name = self.selected_dropdown.get()
+        if not selected_name or selected_name == "No s'han seleccionat fotos":
+            return
+
+        # Clear all selection-related data
+        for path in self.selected_files:
+            self.selection_states[path] = False
+        self.selected_files.clear()
+        self.selected_data.clear()
+
+        self.update_selected_dropdown()
+        self.display_images()  # Refresh checkboxes
 
     def search_images(self, event=None):
-        self.search_status.config(text="Searching...")
+        self.search_status.config(text="Buscant...")
         self.root.update()
 
         query = self.search_entry.get()
@@ -162,7 +172,10 @@ class ImageSearchApp:
 
         self.current_page = 0  # ✅ Always start on the first page
         self.update_page_selector()
-        self.selection_states = {path: False for path in self.image_paths}
+        for path in self.image_paths:
+            if path not in self.selection_states:
+                self.selection_states[path] = False
+
         self.display_images()
 
         self.search_status.config(text="")
@@ -205,17 +218,29 @@ class ImageSearchApp:
         img_label.image = img
         img_label.pack(side="top")
 
+        img_label.bind("<Button-1>", lambda e, path=image_path: self.show_full_image(path))
+
     def show_full_image(self, image_path):
         top = tk.Toplevel(self.root)
         top.title("Image Preview")
         
         img = Image.open(image_path)
-        img.thumbnail((500, 500))
+        img.thumbnail((700, 700))
         img = ImageTk.PhotoImage(img)
 
         label = ttk.Label(top, image=img)
         label.image = img  # Keep reference
         label.pack()
+
+        # Center the window
+        top.update_idletasks()  # Ensure geometry is calculated
+        w = top.winfo_width()
+        h = top.winfo_height()
+        ws = top.winfo_screenwidth()
+        hs = top.winfo_screenheight()
+        x = (ws // 2) - (w // 2)
+        y = (hs // 2) - (h // 2)
+        top.geometry(f"+{x}+{y}")
 
     def update_selected_dropdown(self):
         selected_names = list(self.selected_data.values())  # ✅ Get filenames from stored selections
@@ -224,7 +249,7 @@ class ImageSearchApp:
         if selected_names:
             self.selected_dropdown.set(selected_names[0])  # ✅ Keep first item intact
         else:
-            self.selected_dropdown.set("No files selected")  # ✅ Show default message
+            self.selected_dropdown.set("No s'han seleccionat fotos")  # ✅ Show default message
 
     def toggle_selection(self, path, var):
         self.selection_states[path] = var.get()
@@ -250,28 +275,21 @@ class ImageSearchApp:
         subprocess.run(script_path, shell=True)  # ✅ Run synchronously now
 
         # ✅ Update message once copying is done
-        self.download_status.config(text="Download complete! Check folder.")
+        self.download_status.config(text="Descàrrega completada! Revisa la carpeta --> Descargas > TempPhotos")
         self.root.after(3000, lambda: self.download_status.config(text=""))  # Remove after 3 sec
 
     def run_download_script(self):
         if not self.selected_files:  # ✅ Check if selection is empty
-            self.download_status.config(text="Nothing selected")  # ✅ Show error message
+            self.download_status.config(text="No s'ha seleccionat res")  # ✅ Show error message
             return
         
-        self.download_status.config(text="Downloading...")
+        self.download_status.config(text="Descarregant...")
         self.root.update()  # ✅ Refresh UI immediately
 
         self.generate_batch_script()  # ✅ Create batch script with bulk-copy method
 
         # ✅ Run script without freezing UI
         threading.Thread(target=self.execute_download_script).start()
-
-    def execute_download_script(self):
-        script_path = "./PhotoSearcher/download_photos.bat"
-        subprocess.run(script_path, shell=True)  # ✅ Run batch script synchronously
-
-        self.download_status.config(text="Download complete! Check folder.")
-        self.root.after(3000, lambda: self.download_status.config(text=""))
 
     def generate_batch_script(self):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
